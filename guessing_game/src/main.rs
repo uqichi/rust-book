@@ -7,14 +7,17 @@ use std::io;
 use rand::Rng;
 use std::cmp::Ordering;
 
+const MAX_CHALLENGE: i32 = 10;
+
 fn main() {
-    println!("Guess the number!");
+    println!("Guess the number withing {} challenges!", MAX_CHALLENGE);
 
     // rand::thread_rng関数を呼び出して、これから使う、ある特定の乱数生成器を取得しています。 なお、この乱数生成器は現在のスレッドに固有で、オペレーティングシステムからシード値を得ています。
     // そして、この乱数生成器のgen_rangeメソッドを呼び出しています。 このメソッドはuse rand::Rng文でスコープに導入したRngトレイトで定義されています。
     let secret_number = rand::thread_rng().gen_range(1..101);
 
-    loop {
+    for number in (1..=MAX_CHALLENGE).rev() {
+        println!("Remaining challenges: {}/{}", number, MAX_CHALLENGE);
         println!("Please input your guess");
 
         // newがString型の関連関数であることを示しています
