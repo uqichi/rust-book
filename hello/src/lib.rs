@@ -3,7 +3,7 @@ use std::thread;
 
 pub struct ThreadPool {
     workers: Vec<Worker>,
-    sender: mpsc::Sender<Job>,
+    sender: mpsc::Sender<Message>,
 }
 
 /// Create a new ThreadPool.
@@ -35,28 +35,59 @@ impl ThreadPool {
     {
         let job = Box::new(f);
 
-        self.sender.send(job).unwrap();
+        self.sender.send(Message::NewJob(job)).unwrap();
+    }
+}
+
+impl Drop for ThreadPool {
+    fn drop(&mut self) {
+        println!("Sending terminate message to all workers.");
+
+        for _ in &mut self.workers {
+            self.sender.send(Message::Terminate).unwrap();
+        }
+
+        println!("Shutting down all workers.");
+
+        // ワーカーを2回走査しています: メッセージ送信とjoinを同じループで即座に行おうとすると、
+        // 現在の繰り返しのワーカーがチャンネルからメッセージを受け取っているものであるか保証できなくなってしまいます。
+        for worker in &mut self.workers {
+            println!("Shutting down worker {}", worker.id);
+            if let Some(thread) = worker.thread.take() {
+                thread.join().unwrap();
+            }
+        }
     }
 }
 
 struct Worker {
     id: usize,
-    thread: thread::JoinHandle<()>,
+    thread: Option<thread::JoinHandle<()>>,
 }
 
 impl Worker {
-    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
+    fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Message>>>) -> Worker {
         let thread = thread::spawn(move || loop {
             // recvの呼び出しはブロックするので、まだ仕事がなければ、
             // 現在のスレッドは、仕事が利用可能になるまで待機します
             // Mutex<T>により、ただ1つのWorkerスレッドのみが一度に仕事の要求を試みることを保証します。
-            let job = receiver.lock().unwrap().recv().unwrap();
+            let message = receiver.lock().unwrap().recv().unwrap();
 
-            println!("Worker {} got a job; executing.", id);
-
-            job.call_box();
+            match message {
+                Message::NewJob(job) => {
+                    println!("Worker {} got a job; executing.", id);
+                    job.call_box();
+                }
+                Message::Terminate => {
+                    println!("Worker {} was told to terminate.", id);
+                    break;
+                }
+            }
         });
-        Worker { id, thread }
+        Worker {
+            id,
+            thread: Some(thread),
+        }
     }
 }
 
@@ -73,3 +104,8 @@ impl<F: FnOnce()> FnBox for F {
 }
 
 type Job = Box<dyn FnBox + Send + 'static>;
+
+enum Message {
+    NewJob(Job),
+    Terminate,
+}
